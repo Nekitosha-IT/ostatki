@@ -1,0 +1,32 @@
+name: Inspect uploaded archive
+on:
+  push:
+    branches: [fix/inspect-archive]
+    paths:
+      - ".github/workflows/inspect-archive.yml"
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: List and inspect archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y p7zip-full
+          mkdir -p /tmp/ost
+          7z l "Остатки- 15-10-2026.rar"
+          7z x "Остатки- 15-10-2026.rar" -o/tmp/ost -y >/dev/null
+          echo "=== EXTRACTED FILES ==="
+          find /tmp/ost -type f -printf '%s bytes | %p\n'
+          echo "=== XML TAGS RELEVANT TO THE ERROR ==="
+          grep -R -n -m 30 -E 'СтруктурнаяЕдиница|<Склад|>Склад<' /tmp/ost --include='*.xml' | head -80 || true
+          echo "=== ROOT / EARLY CONTENT OF XML FILES ==="
+          find /tmp/ost -type f -name '*.xml' -print0 | while IFS= read -r -d '' f; do
+            echo "--- $f"
+            head -c 1200 "$f"
+            echo
+          done
