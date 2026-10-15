@@ -17,15 +17,33 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y p7zip-full
           mkdir -p /tmp/ost
-          7z l "Остатки- 15-10-2026.rar"
           7z x "Остатки- 15-10-2026.rar" -o/tmp/ost -y >/dev/null
-          echo "=== EXTRACTED FILES ==="
-          find /tmp/ost -type f -printf '%s bytes | %p\n'
-          echo "=== XML TAGS RELEVANT TO THE ERROR ==="
-          grep -R -n -m 30 -E 'СтруктурнаяЕдиница|<Склад|>Склад<' /tmp/ost --include='*.xml' | head -80 || true
-          echo "=== ROOT / EARLY CONTENT OF XML FILES ==="
-          find /tmp/ost -type f -name '*.xml' -print0 | while IFS= read -r -d '' f; do
-            echo "--- $f"
-            head -c 1200 "$f"
-            echo
-          done
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          p = Path("/tmp/ost/Остатки.xml")
+          def local(tag):
+              return tag.rsplit("}", 1)[-1]
+          print("=== ALL OCCURRENCES OF TARGET DOCUMENT TYPE ===")
+          total = 0
+          for _, el in ET.iterparse(p, events=("end",)):
+              tag = local(el.tag)
+              if "ОстаткиСобственныхТМЦ" in tag:
+                  total += 1
+                  print(f"OBJECT #{total}: tag={tag}")
+                  for child in list(el):
+                      name = local(child.tag)
+                      if name in ("Склад", "СтруктурнаяЕдиница"):
+                          val = "".join(child.itertext()).strip().replace("\\n", " ")
+                          print(f"  {name}: {val[:300]}")
+                          print("  nested tags:", [local(x.tag) for x in list(child)])
+                      else:
+                          text = "".join(child.itertext()).strip().replace("\\n", " ")
+                          print(f"  {name}: {text[:120]}")
+                  if total >= 10:
+                      break
+              el.clear()
+          print("TOTAL_MATCHES_SCANNED:", total)
+          PY
+          echo "=== RAW XML MATCHES FOR TARGET ==="
+          grep -n -m 10 -E 'Документ\.ОстаткиСобственныхТМЦ|ОстаткиСобственныхТМЦ' /tmp/ost/Остатки.xml || true
