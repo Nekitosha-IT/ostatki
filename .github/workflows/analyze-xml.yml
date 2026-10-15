@@ -1,0 +1,60 @@
+name: Analyze Retail 3.0 XML
+on:
+  push:
+    branches: [fix/xdto-xml-analysis]
+    paths:
+      - ".github/workflows/analyze-xml.yml"
+permissions:
+  contents: read
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract and inspect XML
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y p7zip-full
+          mkdir -p /tmp/source /tmp/report
+          7z x "Остатки- 15-10-2026.rar" -o/tmp/source -y >/dev/null
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          src = Path("/tmp/source/Остатки.xml")
+          root = ET.parse(src).getroot()
+          def local(tag): return tag.rsplit("}", 1)[-1]
+          lines = [f"FILE={src.stat().st_size} bytes", f"ROOT={local(root.tag)}"]
+          target = []
+          for el in root.iter():
+              if local(el.tag) == "Документ.ОстаткиСобственныхТМЦ":
+                  target.append(el)
+          lines.append(f"TARGET_DOCUMENTS={len(target)}")
+          for i, el in enumerate(target, 1):
+              lines.append(f"\n=== TARGET #{i} ===")
+              for child in list(el):
+                  name = local(child.tag)
+                  value = " ".join("".join(child.itertext()).split())
+                  lines.append(f"{name}={value[:1000]}")
+                  if name in ("ТМЦ", "AdditionalInfo"):
+                      for sub in list(child)[:30]:
+                          subval = " ".join("".join(sub.itertext()).split())
+                          lines.append(f"  {local(sub.tag)}={subval[:300]}")
+              lines.append("CHILD_TAGS=" + ",".join(local(x.tag) for x in list(el)))
+          # Documents in the full file that have missing/empty location fields.
+          lines.append("\n=== TARGET DOCUMENT FIELD COUNTS ===")
+          for field in ("Склад", "СтруктурнаяЕдиница", "Организация", "ТМЦ", "Дата"):
+              present = sum(any(local(c.tag) == field for c in list(el)) for el in target)
+              nonempty = sum(any(local(c.tag) == field and " ".join("".join(c.itertext()).split()) for c in list(el)) for el in target)
+              lines.append(f"{field}: present={present}/{len(target)} nonempty={nonempty}/{len(target)}")
+          Path("/tmp/report/report.txt").write_text("\n".join(lines), encoding="utf-8")
+          print("\n".join(lines))
+          PY
+          cp /tmp/source/Остатки.xml /tmp/report/Остатки_исходный.xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xml-analysis
+          path: /tmp/report/
+          if-no-files-found: error
+          retention-days: 7
